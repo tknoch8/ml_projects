@@ -1,0 +1,43 @@
+---
+title: "nfl exploration"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+require(lubridate)
+
+basic_stats <- rio::import(here::here("data", "Basic_Stats.csv")) %>% 
+  janitor::clean_names() %>% 
+  mutate(birthdate = mdy(birthday),
+         current_status = as.factor(current_status),
+         position = as.factor(position),
+         experience = if_else(experience == "Rookie", "0", experience),
+         current_team = as.factor(current_team),
+         career_length = as.numeric(parse_number(experience))) %>% 
+  select(-birthday)
+```
+
+```{r}
+
+basic_stats %>% 
+  filter(!is.na(career_length)) %>% 
+  ggplot(aes(career_length)) +
+  geom_histogram(binwidth = 1)
+
+summary(basic_stats %>% filter(!is.na(career_length)) %>% pull(career_length))
+
+```
+
+```{r}
+basic_stats %>% 
+  filter(current_status == "Retired") %>% 
+  mutate(year_retired = as.numeric(as.numeric(parse_number(years_played)) + as.numeric(experience))) %>% 
+  pull(year_retired) %>% 
+  head(150)
+```
+

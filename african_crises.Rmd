@@ -1,0 +1,68 @@
+---
+title: "african crises"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+require(parsnip)
+require(tidymodels)
+
+dat <- rio::import(here::here("data", "african_crises.csv"))
+```
+
+caseA number which denotes a specific country
+cc3A three letter country code
+countryThe name of the country
+yearThe year of the observation
+systemic_crisis"0" means that no systemic crisis occurred in the year and "1" means that a systemic crisis occurred in the year.
+exch_usdThe exchange rate of the country vis-a-vis the USD
+domestic_debt_in_default"0" means that no sovereign domestic debt default occurred in the year and "1" means that a sovereign domestic debt default occurred in the year
+sovereign_external_debt_default"0" means that no sovereign external debt default occurred in the year and "1" means that a sovereign external debt default occurred in the year
+gdp_weighted_defaultThe total debt in default vis-a-vis the GDP
+inflation_annual_cpiThe annual CPI Inflation rate
+independence"0" means "no independence" and "1" means "independence"
+currency_crises"0" means that no currency crisis occurred in the year and "1" means that a currency crisis occurred in the year
+inflation_crises"0" means that no inflation crisis occurred in the year and "1" means that an inflation crisis occurred in the year
+banking_crisis"no_crisis" means that no banking crisis occurred in the year and "crisis" means that a banking crisis occurred in the year
+
+```{r}
+dat %>% count(country)
+
+dat %>% count(year)
+
+dat %>% 
+  ggplot(aes(year)) +
+  geom_histogram(binwidth = 1)
+
+cpi_by_country <- dat %>% 
+  group_by(country) %>% 
+  summarize_at(vars(exch_usd, 
+                    domestic_debt_in_default,
+                    sovereign_external_debt_default,
+                    gdp_weighted_default),
+               mean)
+
+cpi_by_country %>% 
+  mutate(country = fct_reorder(country, desc(sovereign_external_debt_default))) %>% 
+  ggplot(aes(country, sovereign_external_debt_default)) +
+  geom_bar(stat = "identity")
+
+
+dat %>% 
+  mutate(banking_crisis = as.integer(if_else(banking_crisis == "crisis", 1, 0))) %>% 
+  glm(banking_crisis ~ ., data = .) %>% 
+  broom::tidy()
+
+dat %>% 
+  mutate(banking_crisis = as.integer(if_else(banking_crisis == "crisis", 1, 0))) %>% 
+  glm(banking_crisis ~ year + exch_usd + inflation_annual_cpi + independence, data = .) %>% 
+  broom::tidy()
+
+
+```
+

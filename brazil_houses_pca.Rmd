@@ -1,0 +1,117 @@
+---
+title: "brazil-houses-pca"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+require(tidymodels)
+
+make_num_col <- function(col) {
+  col %>% 
+    str_remove(",") %>% 
+    str_extract("[0-9]+") %>% 
+    as.integer()
+}
+
+# import and clean
+# filepathvery destroyed on personal computer, need to fix this
+dat <- read_csv(here::here("data/datasets_554905_1035602_houses_to_rent.csv")) %>% 
+  janitor::clean_names() %>% 
+  mutate_at(vars(hoa:total), ~make_num_col(.)) %>% 
+  filter(floor != "-") %>% 
+  mutate_at(vars(animal:furniture), ~factor(.)) %>% 
+  mutate(floor = as.integer(floor)) %>% 
+  select(-1) %>% 
+  mutate_if(is.double, as.integer) %>% 
+  drop_na() %>% 
+  # some logs
+  # mutate_at(vars(hoa:total), ~log(.)) %>% 
+  # identify log transformed vars
+  # rename_at(vars(hoa:total), ~paste0("log_", .)) %>% 
+  mutate(area = as.factor(area)) %>% 
+  mutate(area = fct_lump(area, 10)) %>% 
+  mutate(id = row_number()) %>% 
+  mutate(animal = if_else(animal == "acept", 1, 0)) %>% 
+  mutate(furniture = if_else(furniture == "furnished", 1, 0)) %>% 
+  # select_if(is.numeric)
+  # mutate(id = paste0(id, "_", city, "_", rooms, "_", bathroom, "_", floor)) %>% 
+  drop_na()
+  # select(id, city, rooms, )
+
+```
+
+```{r}
+pca_rec <- recipe(~., data = dat) %>% 
+  update_role(id, area, new_role = "id") %>% 
+  step_normalize(all_predictors()) %>% 
+  step_pca(all_predictors())
+
+pca_prep <- prep(pca_rec)
+pca_prep
+
+require(broom)
+
+tidy_pca <- tidy(pca_prep, 2)
+
+tidy_pca %>% 
+  filter(component %in% paste0("PC", 1:5)) %>% 
+  mutate(component = fct_inorder(component)) %>% 
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(y = NULL)
+```
+
+```{r}
+require(tidytext)
+
+tidy_pca %>% 
+  filter(component %in% paste0("PC", 1:4)) %>% 
+  group_by(component) %>% 
+  top_n(8, abs(value)) %>% 
+  ungroup() %>% 
+  mutate(terms = tidytext::reorder_within(terms, abs(value), component)) %>% 
+  ggplot(aes(abs(value), terms, fill = value > 0)) +
+  geom_col() +
+  tidytext::scale_y_reordered() +
+  facet_wrap(~component, nrow = 1, scales = "free_y") +
+  labs(y = NULL, fill = "Positive?")
+```
+
+```{r}
+# need a better id var
+juice(pca_prep) %>% 
+  sample_n(150) %>% 
+  ggplot(aes(PC1, PC3, label = id)) +
+  geom_point(aes(color = area), alpha = .4, size = 2) +
+  geom_text(check_overlap = TRUE, hjust = "inward") +
+  labs(color = NULL)
+
+juice(pca_prep) %>% 
+  ggplot(aes(PC1, PC2, label = area)) +
+  geom_point(aes(color = area), alpha = .4, size = 2) +
+  geom_text(check_overlap = TRUE, hjust = "inward") +
+  labs(color = NULL)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

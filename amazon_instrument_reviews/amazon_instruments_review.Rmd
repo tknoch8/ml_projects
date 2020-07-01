@@ -1,0 +1,270 @@
+---
+title: "amazon-instrument-reviews"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+require(tidymodels)
+
+# data from https://www.kaggle.com/eswarchandt/amazon-music-reviews
+
+reviews <- read_csv("amazon_instrument_reviews/amazon-music-reviews/Musical_instruments_reviews.csv") %>%
+  # snake case names
+  janitor::clean_names() %>% 
+  # first number parsed is number of people who found that review helpful
+  mutate(num_helpful = parse_number(helpful)) %>% 
+  # was the review hwlpful to anyone
+  mutate(was_helpful = if_else(num_helpful > 0, "yes", "no")) %>% 
+  mutate(was_helpful = as.factor(was_helpful)) %>% 
+  # convert chr date to date class
+  mutate(review_date = anytime::anydate(review_time)) %>% 
+  # keep reviews after 2010
+  filter(lubridate::year(review_date) >= 2010) %>% 
+  # did the review give 5 stars
+  mutate(five_stars = if_else(overall == 5, "yes", "no")) %>% 
+  mutate(five_stars = as.factor(five_stars))
+
+# inspect
+reviews %>% 
+  View()
+
+```
+
+## exploration
+
+```{r}
+require(tidytext)
+
+# distribution of helpful review counts
+reviews %>% 
+  ggplot(aes(num_helpful)) +
+  geom_histogram() +
+  scale_x_log10()
+  
+# most common words
+review_words <- reviews %>% 
+  unnest_tokens(word, review_text) %>% 
+  anti_join(stop_words)
+
+# very skewed towards 1 (low rating)
+reviews %>% 
+  ggplot(aes(overall)) +
+  geom_histogram() +
+  labs(title = "Most ratings are quite high")
+
+# variance in weekly average ratings has decreased
+
+by_month <- reviews %>% 
+  group_by(month = lubridate::floor_date(review_date, "month")) %>% 
+  summarize(
+    n_ratings = n(),
+    avg_rating = mean(overall),
+    pct_5 = mean(overall == 5),
+    pct_lower = mean(overall != 5)
+  ) %>% 
+  ungroup()
+
+# same by month
+by_month %>% 
+  ggplot(aes(month, avg_rating)) +
+  geom_line() +
+  geom_smooth(method = "loess") +
+  labs(title = "Average monthly ratings seem to have declined")
+
+# monthly number of ratings seems to have steadily increased
+by_month %>% 
+  ggplot(aes(month, pct_5)) +
+  geom_line() +
+  geom_point(aes(size = n_ratings)) +
+  labs(title = "Monthly number of ratings seems to have steadily increased",
+       x = "",
+       y = "% of reviews given five stars")
+
+```
+
+## quick topic modeling
+
+```{r}
+require(stm)
+require(widyr)
+
+# create sparse matrix for topic modeling
+rev_matrix <- review_words %>% 
+  group_by(word) %>% 
+  add_count(word) %>% 
+  filter(n() >= 20) %>% 
+  cast_sparse(reviewer_id, word, n)
+
+# create topic model
+topic_model <- stm(
+  rev_matrix,
+  # may need to play around with number of topics
+  K = 6,
+  verbose = TRUE,
+  init.type = "Spectral"
+)
+
+require(broom)
+
+# top words defining each topic
+topic_model %>% 
+  tidy() %>% 
+  group_by(topic) %>% 
+  top_n(10, beta) %>% 
+  ungroup() %>% 
+  mutate(term = tidytext::reorder_within(term, beta, topic)) %>% 
+  ggplot(aes(beta, term)) +
+  geom_col() +
+  facet_wrap(~topic, scales = "free")
+
+```
+
+## build model to predict if a review was 5 stars or not
+
+```{r}
+
+# which veriables to model with
+reviews <- reviews %>% 
+  select(reviewer_id, 
+         review_text,
+         # overall, 
+         # was_helpful, 
+         # review_date, 
+         five_stars)
+
+set.seed(20200515)
+rev_split <- initial_split(reviews, strata = five_stars)
+train_df <- training(rev_split)
+test_df <- testing(rev_split)
+
+require(textrecipes)
+
+rev_rec <- recipe(five_stars ~ ., data = train_df) %>% 
+  update_role(reviewer_id, new_role = "id variable") %>% 
+  step_tokenize(review_text) %>% 
+  step_stopwords(review_text) %>% 
+  step_tokenfilter(review_text, max_tokens = 500) %>% 
+  step_tfidf(review_text) %>% 
+  step_normalize(all_numeric())
+
+# prep recipe
+rev_prep <- prep(rev_rec)
+rev_prep
+
+# see prepped training data
+juice(rev_prep)
+
+# specify model
+lasso_spec <- logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet")
+
+# create workflow
+wf <- workflow() %>% 
+  add_recipe(rev_rec) %>% 
+  add_model(lasso_spec)
+
+wf
+```
+
+## tune parameters
+
+```{r}
+# create bootstrap resamples
+boots <- bootstraps(train_df, strata = five_stars)
+boots
+
+# make lambda grid
+lambda_grid <- grid_regular(penalty(), levels = 50)
+
+doParallel::registerDoParallel()
+
+set.seed(4)
+
+# fit models over parameter grid
+lasso_grid <- tune_grid(
+  wf,
+  resamples = boots,
+  grid = lambda_grid,
+  metrics = metric_set(roc_auc, ppv, npv)
+) 
+  
+```
+
+## evaluate metrics
+
+```{r}
+# visualize metrics for model fit on each value of lambda
+lasso_grid %>% 
+  collect_metrics() %>% 
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_line(size = 1.5, show.legend = FALSE) +
+  facet_wrap(~.metric, nrow = 1) +
+  scale_x_log10()
+```
+
+I am not a statistician (yet) so I will make any definitive statements as to the statistical integrity of this model. I am not including for purely demonstrational purposes.
+
+## get the 'best' model
+
+```{r}
+# penalty value for the model with the best "area under the curve"
+best_auc <- lasso_grid %>% 
+  select_best("roc_auc")
+
+best_auc
+
+final_mod <- finalize_workflow(wf, best_auc)
+
+final_mod
+```
+
+## Variable importance
+
+```{r}
+require(vip)
+
+final_mod %>% 
+  fit(train_df) %>% 
+  pull_workflow_fit() %>% 
+  vi(lambda = best_auc$penalty) %>% 
+  group_by(Sign) %>% 
+  top_n(20, wt = abs(Importance)) %>% 
+  ungroup() %>% 
+  mutate(Importance = abs(Importance),
+         Variable = str_remove(Variable, "tfidf_review_text_"),
+         Variable = fct_reorder(Variable, Importance)) %>% 
+  ggplot(aes(x = Importance, y = Variable, fill = Sign)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~Sign, scales = "free_y")
+```
+
+```{r}
+rev_final <- last_fit(final_mod, rev_split)
+
+# view metrics
+rev_final %>% 
+  collect_metrics()
+
+# view predictions
+rev_final %>% 
+  collect_predictions()
+
+# view confusion matrix
+rev_final %>% 
+  collect_predictions() %>% 
+  conf_mat(five_stars, .pred_class)
+```
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,163 @@
+---
+title: "myfitnesspal exploration"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+require(lubridate)
+```
+
+```{r}
+exercise_dat <- rio::import(here::here("myfitnesspal_data", 
+                                       "Exercise-Summary-2019-04-21-to-2019-11-27.csv")) %>% 
+  janitor::clean_names() %>% 
+  filter(exercise != "MFP iOS calorie adjustment")
+
+measurement_dat <- rio::import(here::here("myfitnesspal_data", 
+                                          "Measurement-Summary-2019-04-21-to-2019-11-27.csv")) %>% 
+  janitor::clean_names()
+
+nutrition_dat <- rio::import(here::here("myfitnesspal_data", 
+                                        "Nutrition-Summary-2019-04-21-to-2019-11-27.csv")) %>% 
+  janitor::clean_names()
+
+dat <- exercise_dat %>% 
+  left_join(measurement_dat, by = "date") %>% 
+  left_join(nutrition_dat, by = "date") %>% 
+  mutate(date = as.Date(date)) %>% 
+  filter(!is.na(protein_g)) %>% 
+  filter(date > "2019-07-15") %>% 
+  mutate(week_day = as.factor(weekdays(date)))
+
+```
+
+distribution of calories burned, and date
+
+```{r}
+
+exercise_dat %>% 
+  ggplot(aes(exercise_calories)) +
+  geom_histogram(bins = 30)
+
+dat %>% 
+  # filter(date > "2019-07-15") %>% 
+  ggplot(aes(date)) +
+  geom_histogram(binwidth = 7)
+  
+```
+
+```{r}
+exercise_dat %>% 
+  ggplot(aes(date, exercise_calories, color = type)) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1))
+```
+
+```{r}
+dat %>% 
+  group_by(week = floor_date(date, unit = "week"), meal) %>% 
+  summarize_at(vars(fat_g, protein_g, carbohydrates_g, sugar), mean) %>% 
+  ungroup() -> macros_by_week
+
+macros_by_week %>% 
+  ggplot(aes(week, protein_g, group = meal, color = meal)) +
+  geom_line()
+
+## learn how to use gather()
+
+macros_by_week %>% 
+  select(week, matches("protein || fat || carbohydrates || sugar"))
+
+macros_by_week %>% 
+  pivot_longer(cols = c(week, matches("protein || fat || carbohydrates || sugar || meal")),
+               names_to = "macro_nutrient")
+
+macros_by_week %>% 
+  lm(protein_g ~., data = .) %>% 
+  broom::tidy() %>% 
+  arrange(desc(estimate)) %>% 
+  filter(p.value <= 0.05)
+
+x <- macros_by_week %>% 
+  select(c(week_day, matches("protein || fat || carbohydrates || sugar || cholesterol || iron")))
+
+GGally::ggpairs(x)  # fairly slow, need to get rid of NA columns
+
+macros_by_week %>% 
+  select(c(week_day, matches("protein || fat || carbohydrates || sugar || cholesterol || iron"))) %>% 
+  lm(protein_g ~., data = .) %>% 
+  broom::tidy() %>% 
+  arrange(desc(estimate)) %>% 
+  filter(p.value <= 0.05)
+
+lm(protein_g ~ fat_g, data = dat) %>% 
+  summary()
+
+
+
+```
+
+
+
+```{r}
+dat %>% 
+  ggplot(aes(date, calories)) +
+  geom_bar(stat = "identity")
+
+dat %>% 
+  group_by(date, meal) %>% 
+  summarize(daily_calories = mean(calories)) %>% 
+  ungroup() %>% 
+  filter(daily_calories > 2000) %>% 
+  ggplot(aes(date, daily_calories)) +
+  geom_bar(stat = "identity")
+```
+
+classify meal
+
+```{r}
+require(tidymodels)
+# partition data (representitive sample based on meal proportions)
+
+dat <- dat %>% 
+  select(-c(sets, reps_per_set, pounds, steps, note.x, weight, note.y, exercise)) %>% 
+  filter(!is.na(trans_fat))
+
+init_split <- initial_split(dat, strata = "meal")
+
+# extract training set
+train_df <- training(init_split)
+
+# extract testing set
+test_df <- testing(init_split)
+
+# define recipe: center and scale 
+# keep it simple for example purposes
+meal_rec <- recipe(meal ~ ., data = train_df)  %>%
+  step_center(all_numeric()) %>%
+  step_scale(all_numeric()) %>%
+  prep()
+
+# apply pre-processing to create tibbles ready for modeling
+meal_train <- bake(meal_rec, train_df)
+meal_test <- bake(meal_rec, test_df)
+
+meal_classifier <- rand_forest(mode = "classification", mtry = .preds()) %>%
+    set_engine("ranger") %>%
+    fit(meal ~ ., data = meal_train)
+
+meal_preds <- predict(meal_classifier, meal_test) %>%
+  bind_cols(meal_test) %>% 
+  select(meal, .pred_class, everything())
+
+meal_estimates <- predict(meal_classifier, meal_test) %>%
+    bind_cols(meal_test) %>% # <- see actuals next to predictions for each observation
+    metrics(truth = meal, estimate = .pred_class)
+
+```
+

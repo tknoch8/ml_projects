@@ -1,0 +1,99 @@
+---
+title: "city-temps"
+author: "Travis Knoche"
+date: "6/18/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+temps <- read_csv("city_temperature.csv") %>% 
+  janitor::clean_names() %>% 
+  filter(year == 2000)
+temps
+```
+
+```{r}
+parsed <- temps %>% 
+  mutate_at(vars(month, day), ~as.character(.)) %>% 
+  mutate_at(vars(month, day), ~if_else(nchar(.) < 2, paste0("0", .), .)) %>% 
+  mutate_at(vars(month, day), ~factor(.)) %>% 
+  mutate(date = as.Date(paste0(year, "-", month, "-", day))) %>% 
+  select(region, country, state, city, date, avg_temperature)
+
+parsed %>% 
+  count(country, sort = TRUE)
+
+parsed %>% 
+  # filter(country == "US") %>% 
+  count(state, sort = TRUE)
+
+parsed <- parsed %>% 
+  select(-state)
+
+parsed %>% 
+  filter(country %in% c("Algeria", "Nigeria", "Tunisia")) %>% 
+  ggplot(aes(date, avg_temperature, group = country, color = country)) +
+  geom_line()
+
+parsed %>% 
+  filter(country == "Nigeria") %>% 
+  # mutate(avg_temperature = abs(avg_temperature)) %>% 
+  ggplot(aes(date, avg_temperature)) +
+  geom_point()
+
+require(imputeTS)
+
+# transform errant temperatures to NA
+nigeria <- parsed %>% 
+  filter(country == "Nigeria") %>% 
+  mutate(imputed = if_else(avg_temperature == -99, "imputed", "not")) %>% 
+  mutate(avg_temperature = if_else(avg_temperature == -99, NA_real_, avg_temperature))
+
+nigeria %>% 
+  ggplot(aes(date, avg_temperature)) +
+  geom_point()
+
+# 265 NAs to deal with
+nigeria %>% 
+  summary()
+
+# impute errant temperature entries for nigeria
+nigeria_imputed <- nigeria %>% 
+  mutate(avg_temperature = imputeTS::na_interpolation(avg_temperature, option = "stine"))
+
+nigeria_imputed %>% 
+  filter(country == "Nigeria") %>% 
+  # mutate(avg_temperature = abs(avg_temperature)) %>% 
+  ggplot(aes(date, avg_temperature, color = imputed)) +
+  geom_point()
+
+# size of previous records with weird temperatures converted to NAs and removed
+nigeria %>% 
+  filter(!is.na(avg_temperature)) %>% 
+  nrow()
+
+# size of records with weird temperatures converted to NAs and "stine" imputed
+# other methods available are "linear" and "spline"
+nigeria_imputed %>% 
+  nrow()
+
+nigeria_imputed %>% 
+  ggplot(aes(imputed, avg_temperature, color = imputed)) +
+  geom_boxplot()
+
+imputed <- nigeria_imputed %>% 
+  filter(imputed == "imputed")
+
+not <- nigeria_imputed %>% 
+  filter(imputed == "not")
+
+# H0: means are the same, U1 - U2 = 0
+# HA: means are different, U1 - U2 != 0
+
+t.test(imputed$avg_temperature, not$avg_temperature, alternative = "two.sided", var.equal = FALSE)
+```

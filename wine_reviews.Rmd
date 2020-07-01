@@ -1,0 +1,129 @@
+---
+title: "wine reviews"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+
+wine <- rio::import(here::here("data", "winemag-data_first150k.csv"))
+```
+
+```{r}
+wine %>% 
+  count(country, sort = TRUE)
+
+wine %>% 
+  filter(country == "US") %>% 
+  count(province, sort = TRUE)
+
+wine %>% 
+  filter(country == "Spain") %>% 
+  count(province, sort = TRUE)
+
+
+# get most common provinces/states across countries
+areas_counted <- wine %>% 
+  unite(area, "province", "country", sep = ", ") %>% 
+  count(area, sort = TRUE)
+
+wine %>% 
+  unite(area, "province", "country", sep = ", ") %>% 
+  count(area, winery, variety, sort = TRUE)
+
+```
+
+Are wineries' most reviewed wines their best reviewed wines?
+
+```{r}
+dat <- wine %>% 
+  unite(area, "province", "country", sep = ", ")
+
+varieties_by_winery <- dat %>% 
+  group_by(area, winery, variety) %>% 
+  add_count() %>% 
+  arrange(desc(n)) %>% 
+  # filter(area %in% areas_counted$area[1:15]) %>% 
+  ungroup()
+
+by_variety <- varieties_by_winery %>% 
+  group_by(winery, variety) %>% 
+  summarize(mean_points = mean(points),
+            median_points = median(points),
+            n_reviews = n()) %>% 
+  arrange(desc(n_reviews)) %>% 
+  filter(n_reviews >= 50) %>% 
+  ungroup()
+
+by_variety %>% 
+  count(winery, sort = TRUE)
+  
+  # group_by(winery) %>% 
+  # summarize(best_wine = max(points))
+
+
+```
+
+
+What predicts a wine's country?
+
+```{r}
+require(parsnip)
+require(tidymodels)
+require(tidyverse)
+
+# wine %>% 
+#   select(1:6) %>% 
+#   sample_frac(.2) %>% 
+#   glm(points ~., data = .) %>% 
+#   broom::tidy() %>% 
+#   filter(p.value <= 0.05) %>% 
+#   arrange(desc(estimate)) -> result
+
+wine_class_dat <- wine %>% 
+  mutate(country = as.factor(country)) %>% 
+  filter(!is.na(price)) %>% 
+  mutate_if(is.character, as.factor) %>% 
+  filter(! country %in% c("Egypt", "Tunisia"))
+
+
+# set seed
+set.seed(8)
+
+# partition data (representitive sample based on chart proportions)
+init_split <- initial_split(wine_class_dat, prop = .7, strata = "country")
+
+# extract training set
+train_df <- training(init_split)
+
+# extract testing set
+test_df <- testing(init_split)
+
+wine_recipe <- recipe(country ~ ., data = train_df)  %>%
+  step_center(all_numeric()) %>%
+  step_scale(all_numeric()) %>%
+  prep()
+
+# pin recipe
+require(pins)
+
+wine_recipe %>% pin(name = "wine_recipe", board = "local")
+
+# apply pre-processing to create tibbles ready for modeling
+wine_train <- bake(wine_recipe, train_df)
+wine_test <- bake(wine_recipe, test_df)
+
+
+wine_classifier <- rand_forest(mode = "classification") %>%
+  set_engine("ranger") %>%
+  fit(country ~ ., data = wine_train)
+
+pin(wine_classifier, name = "wine_classifier", board = "local")
+```
+
+
+

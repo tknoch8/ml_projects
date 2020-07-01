@@ -1,0 +1,200 @@
+---
+title: "acled text analysis"
+output: html_document
+---
+  
+  https://www.youtube.com/watch?v=Xt7ACiedRRI
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+require(tidyverse)
+require(tidytext)
+
+source(here::here("get_acled_records.R"))
+```
+
+
+```{r}
+sahel_countries <- c(
+  "Senegal", 
+  "Mauritania", 
+  "Mali", 
+  "Burkina Faso", 
+  "Algeria", 
+  "Niger", 
+  "Nigeria", 
+  "Chad", 
+  "Sudan", 
+  "Eritrea"
+)
+
+acsamp <- crossing(
+  country = sahel_countries
+) %>% 
+  map_df(
+    .x = .$country,
+    .f = ~get_acled_dat(.country = .x, .year = 2019)
+  )
+
+reps <- acsamp %>% 
+  # filter(country == "Mali") %>% 
+  # filter(actor1 == "JNIM: Group for Support of Islam and Muslims") %>% 
+  rename(text = notes) %>% 
+  mutate(fatalities = if_else(as.numeric(fatalities) > 0, 1, 0)) %>% 
+  mutate(fatalities = as.factor(fatalities))
+
+reps %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words) %>% 
+  count(data_id, event_date, fatalities, word, sort = TRUE)
+
+```
+
+```{r}
+words_per_rep <- reps %>% 
+  unnest_tokens(word, text) %>% 
+  count(data_id, name = "total_words")
+
+words_per_rep %>% 
+  ggplot(aes(total_words)) +
+  geom_histogram()
+
+reps_parsed <- reps %>% 
+  mutate(text = str_remove_all(text, "\\[[Ss]ize=.+\\]"))
+
+sample(reps_parsed$text, 5)
+```
+
+
+## build model
+
+```{r}
+require(tidymodels)
+
+set.seed(1020983)
+
+rep_split <- initial_split(reps_parsed, strata = "fatalities")
+
+rep_train <- training(rep_split)
+rep_test <- testing(rep_split)
+
+```
+
+```{r}
+library(textrecipes)
+
+rep_rec <- recipe(fatalities ~ text, data = rep_train) %>% 
+  step_tokenize(text) %>% 
+  step_stopwords(text) %>% 
+  step_tokenfilter(text, max_tokens = 500) %>%   # filter heavily so model runs quickly
+  step_tfidf(text) %>% 
+  # center and scale all predictors after converting to tf_idf
+  step_normalize(all_predictors())
+
+rep_prep <- prep(rep_rec)
+
+```
+
+```{r}
+# declare model specification
+
+lasso_spec <- logistic_reg(penalty = tune(),
+                           mixture = 1) %>% # lasso model
+  set_engine("glmnet")
+
+# make workflow object
+lasso_wf <- workflow() %>% 
+  add_recipe(rep_rec) %>% 
+  add_model(lasso_spec)
+
+lasso_wf
+```
+
+
+## tune parameters
+
+```{r}
+lambda_grid <- grid_regular(penalty(),
+                            levels = 200)
+
+set.seed(1423)
+rep_folds <- bootstraps(rep_train,
+                        strata = fatalities)
+rep_folds
+
+```
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(2020)
+
+lasso_grid <- tune_grid(
+  lasso_wf,
+  resamples = rep_folds,
+  grid = lambda_grid,
+  metrics = metric_set(roc_auc, ppv, npv)
+)
+```
+
+```{r}
+lasso_grid %>% 
+  collect_metrics()
+
+lasso_grid %>% 
+  collect_metrics() %>% 
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_line(size = 1.5, show.legend = FALSE) +
+  facet_wrap(~.metric, ncol = 1) +
+  scale_x_log10()
+
+# auc: best model by auc is peak auc
+```
+
+
+## choose final model
+
+```{r}
+best_auc <- lasso_grid %>% 
+  select_best("roc_auc")
+
+best_auc
+
+final_lasso <- finalize_workflow(lasso_wf,
+                                 best_auc)
+
+final_lasso
+```
+
+
+## variable importance in predicting if a report included fatalities or not
+
+```{r}
+library(vip)
+
+# fit and get importance for all tokens
+fit <- final_lasso %>% 
+  fit(rep_train) %>% 
+  pull_workflow_fit() %>% 
+  vi(lambda = best_auc$penalty)
+
+fit %>% 
+  group_by(Sign) %>% 
+  top_n(25, wt = abs(Importance)) %>% 
+  ungroup() %>% 
+  mutate(Importance = abs(Importance),
+         Variable = str_remove(Variable, "tfidf_text_"),
+         Variable = fct_reorder(Variable, Importance)) %>% 
+  ggplot(aes(Importance, Variable, fill = Sign)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~Sign, scales = "free_y")
+```
+
+
+
+
+

@@ -1,0 +1,241 @@
+---
+title: "brazil-houses-lm"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## import and clean
+
+```{r}
+require(tidyverse)
+require(tidymodels)
+
+# clean dollar columns
+make_num_col <- function(col) {
+  col %>% 
+    str_remove(",") %>% 
+    str_extract("[0-9]+") %>% 
+    as.integer()
+}
+
+# import and clean
+# filepathvery destroyed on personal computer, need to fix this
+dat <- read_csv(here::here("data/datasets_554905_1035602_houses_to_rent.csv")) %>% 
+  janitor::clean_names() %>% 
+  mutate_at(vars(hoa:total), ~make_num_col(.)) %>% 
+  filter(floor != "-") %>% 
+  mutate_at(vars(animal:furniture), ~factor(.)) %>% 
+  mutate(floor = as.integer(floor)) %>% 
+  select(-1) %>% 
+  mutate_if(is.double, as.integer) %>% 
+  drop_na() %>% 
+  # some logs
+  mutate_at(vars(hoa:total), ~log(.)) %>% 
+  # identify log transformed vars
+  rename_at(vars(hoa:total), ~paste0("log_", .)) %>% 
+  mutate(area = as.factor(area)) %>% 
+  mutate(city = as.factor(city)) %>% 
+  # log_property_tax and log_hoa are all NaN, ignore for now
+  select(-log_property_tax, -log_hoa, -log_total, -animal) %>% 
+  select(-area) %>% 
+  mutate(rent_bin = case_when(
+    log_rent_amount < 7.5 ~ "cheap",
+    log_rent_amount >= 7.5 & log_rent_amount < 8.5 ~ "medium",
+    log_rent_amount >= 8.5 ~ "expensive"
+  )) %>% 
+  mutate(rent_bin = factor(rent_bin)) %>% 
+  select(-log_rent_amount, -log_fire_insurance)
+
+glimpse(dat)
+head(dat)
+
+# check missing
+skimr::skim(dat)
+```
+
+## create test/train split
+
+```{r}
+init_split <- dat %>% 
+  initial_split(strata = "rent_bin")
+
+train_df <- training(init_split)
+test_df <- testing(init_split)
+
+```
+
+## pre-processing recipe
+
+```{r}
+rf_rec <- recipe(rent_bin ~., data = train_df) %>% 
+  step_scale(all_numeric()) %>% 
+  step_dummy(all_nominal(), -all_outcomes())  # <- too many levels
+  # step_dummy(city, animal, furniture)
+```
+
+## prep recipe
+
+```{r}
+rent_prep <- prep(rf_rec)
+```
+
+## view pre-processed data
+
+```{r}
+juice(rent_prep) %>% 
+  View()
+
+rent_juiced <- juice(rent_prep)
+```
+
+## random forest
+
+```{r}
+tune_spec <- rand_forest(
+  mtry = tune(),
+  trees = 1000,
+  min_n = tune()
+) %>% 
+  set_mode("classification") %>% 
+  set_engine("ranger")
+
+tune_wf <- workflow() %>% 
+  add_recipe(rf_rec) %>% 
+  add_model(tune_spec)
+
+```
+
+## tune hyperparameters
+
+```{r}
+set.seed(9876)
+my_folds <- vfold_cv(train_df)
+
+doParallel::registerDoParallel()
+
+set.seed(8765)
+
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = my_folds,
+  grid = 20
+)
+```
+
+## eval
+
+```{r}
+pivot_tune <- tune_res %>% 
+  collect_metrics() %>% 
+  filter(.metric == "roc_auc") %>% 
+  select(mean, min_n, mtry) %>% 
+  pivot_longer(min_n:mtry, values_to = "value", names_to = "parameter")
+
+pivot_tune %>% 
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x")
+
+```
+
+## tune again based on information (plot)
+
+```{r}
+rf_grid <- grid_regular(
+  mtry(range = c(1, 5)),
+  min_n(range = c(35, 55)),
+  levels = 7
+)
+
+set.seed(5678)
+regular_res <- tune_grid(
+  tune_wf,
+  resamples = my_folds,
+  grid = rf_grid
+)
+
+regular_res %>% 
+  collect_metrics() %>% 
+  filter(.metric == "roc_auc") %>% 
+  mutate(min_n = factor(min_n)) %>% 
+  ggplot(aes(mtry, mean, color = min_n)) +
+  geom_line(alpha = .7) +
+  geom_point()
+  # pivot_longer(min_n:mtry,
+  #              values_to = "value",
+  #              names_to = "parameter") %>% 
+  # ggplot(aes(value, mean, color = parameter)) +
+  # geom_point(show.legend = FALSE) +
+  # facet_wrap(~parameter, scales = "free_x")
+```
+
+```{r}
+best_rsq <- select_best(regular_res, "roc_auc")
+
+final_rf <- finalize_model(
+  tune_spec,
+  best_rsq
+)
+```
+
+
+```{r}
+require(vip)
+final_rf %>% 
+  set_engine("ranger", importance = "permutation") %>% 
+  fit(rent_bin ~., data = rent_juiced) %>% 
+  vip(geom = "point")
+
+```
+
+```{r}
+final_wf <- workflow() %>% 
+  add_recipe(rf_rec) %>% 
+  add_model(final_rf)
+
+final_res <- final_wf %>% 
+  last_fit(init_split)
+
+final_res %>% 
+  collect_metrics()
+
+final_res %>% 
+  collect_predictions() %>% 
+  bind_cols(test_df %>% 
+              select(rent_bin, everything()))
+```
+
+```{r}
+my_results <- final_res %>% 
+  collect_predictions() %>% 
+  mutate(correct = case_when(
+    rent_bin == .pred_class ~ "Correct",
+    TRUE ~ "Incorrect"
+  )) %>% 
+  bind_cols(test_df) %>% 
+  mutate(rent_bin = rent_bin...7) %>% 
+  select(-rent_bin...15, -rent_bin...7)
+
+my_results %>% 
+  filter(.pred_class == "cheap" & rent_bin == "expensive") %>% 
+  nrow()
+
+my_results %>% 
+  filter(.pred_class == "expensive" & rent_bin == "cheap") %>% 
+  nrow()
+
+# conf_mat
+my_results %>% 
+  conf_mat(rent_bin, .pred_class)
+
+```
+
+
+
+
+
+
+

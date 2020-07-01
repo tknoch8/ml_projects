@@ -1,0 +1,297 @@
+---
+title: "brazil-houses-lm"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## import and clean
+
+```{r}
+require(tidyverse)
+require(tidymodels)
+
+# clean dollar columns
+make_num_col <- function(col) {
+  col %>% 
+    str_remove(",") %>% 
+    str_extract("[0-9]+") %>% 
+    as.integer()
+}
+
+# import and clean
+# filepathvery destroyed on personal computer, need to fix this
+dat <- read_csv(here::here("data/datasets_554905_1035602_houses_to_rent.csv")) %>% 
+  janitor::clean_names() %>% 
+  mutate_at(vars(hoa:total), ~make_num_col(.)) %>% 
+  filter(floor != "-") %>% 
+  mutate_at(vars(animal:furniture), ~factor(.)) %>% 
+  mutate(floor = as.integer(floor)) %>% 
+  select(-1) %>% 
+  mutate_if(is.double, as.integer) %>% 
+  drop_na() %>% 
+  # some logs
+  mutate_at(vars(hoa:total), ~log(.)) %>% 
+  # identify log transformed vars
+  rename_at(vars(hoa:total), ~paste0("log_", .)) %>% 
+  mutate(area = as.factor(area)) %>% 
+  mutate(city = as.factor(city)) %>% 
+  # log_property_tax and log_hoa are all NaN, ignore for now
+  select(-log_property_tax, -log_hoa, -log_total, -animal) %>% 
+  select(-area)
+
+glimpse(dat)
+head(dat)
+
+# check missing
+skimr::skim(dat)
+```
+
+## create test/train split
+
+```{r}
+init_split <- dat %>% 
+  initial_split()
+
+train_df <- training(init_split)
+test_df <- testing(init_split)
+
+```
+
+## specify model
+
+```{r}
+lin_spec <- linear_reg() %>% 
+  set_mode("regression") %>% 
+  set_engine("lm")
+```
+
+## pre-processing recipe
+
+```{r}
+rent_rec <- recipe(log_rent_amount ~., data = train_df) %>% 
+  step_scale(all_numeric()) %>% 
+  step_dummy(all_nominal())  # <- too many levels
+  # step_dummy(city, animal, furniture)
+```
+
+## prep recipe
+
+```{r}
+rent_prep <- prep(rent_rec)
+```
+
+## view pre-processed data
+
+```{r}
+juice(rent_prep) %>% 
+  View()
+
+rent_juiced <- juice(rent_prep)
+```
+
+```{r}
+require(broom)
+
+lin_fit <- lin_spec %>% 
+  fit(log_rent_amount ~., data = rent_juiced)
+
+preds <- lin_fit %>% 
+  predict(new_data = rent_juiced, 
+          type = "conf_int",
+          level = 0.95) %>% 
+  mutate(.pred = (.pred_lower + .pred_upper)/2) %>% 
+  mutate(truth = rent_juiced$log_rent_amount,
+         model = "lm")
+
+
+wf <- workflow() %>% 
+  add_recipe(rent_rec) %>% 
+  add_model(lin_spec)
+
+wf %>% 
+  last_fit(init_split) %>% 
+  collect_metrics()
+
+wf %>% 
+  last_fit(init_split) %>% 
+  collect_predictions()
+
+preds %>% 
+  mutate(in_95 = if_else(between(truth, .pred_lower, .pred_upper), "yes", "no")) %>% 
+  count(in_95)
+
+preds %>% 
+  ggplot(aes(truth, .pred)) +
+  geom_point(color = "black") +
+  geom_errorbar(aes(ymin = .pred_lower, ymax = .pred_upper), 
+                color = "blue", alpha = 0.3)
+
+set.seed(1235)
+
+obs <- rent_juiced %>% 
+  filter(row_number() %in% sample(1:nrow(.), 30))
+
+# get one observation and predict its log_rent
+my_pred <- lin_fit %>% 
+  predict(obs)
+
+my_confint <- lin_fit %>% 
+  predict(obs, type = "conf_int", level = 0.95)
+
+obs %>% 
+  cbind(my_pred) %>% 
+  select(log_rent_amount, .pred) %>% 
+  mutate(rent = exp(log_rent_amount),
+         .pred2 = exp(.pred)) %>% 
+  mutate(perc_of = .pred2/rent)
+
+obs
+my_pred
+my_confint
+
+## base R model
+
+my_lm <- lm(log_rent_amount ~., data = rent_juiced)
+
+my_tidy_lm <- tidy(my_lm)
+
+my_tidy_lm %>% 
+  filter(term != "(Intercept)") %>% 
+  filter(!str_detect(term, "area")) %>% 
+  arrange(desc(estimate))
+
+anova(my_lm)
+```
+
+## random forest
+
+```{r}
+rf_rec <- rent_rec
+
+tune_spec <- rand_forest(
+  mtry = tune(),
+  trees = 1000,
+  min_n = tune()
+) %>% 
+  set_mode("regression") %>% 
+  set_engine("ranger")
+
+tune_wf <- workflow() %>% 
+  add_recipe(rf_rec) %>% 
+  add_model(tune_spec)
+
+```
+
+## tune hyperparameters
+
+```{r}
+set.seed(9876)
+my_folds <- vfold_cv(train_df)
+
+doParallel::registerDoParallel()
+
+set.seed(8765)
+
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = my_folds,
+  grid = 20
+)
+```
+
+## eval
+
+```{r}
+pivot_tune <- tune_res %>% 
+  collect_metrics() %>% 
+  filter(.metric == "rsq") %>% 
+  select(mean, min_n, mtry) %>% 
+  pivot_longer(min_n:mtry, values_to = "value", names_to = "parameter")
+
+pivot_tune %>% 
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x")
+
+```
+
+## tune again based on information (plot)
+
+```{r}
+rf_grid <- grid_regular(
+  mtry(range = c(1, 7)),
+  min_n(range = c(35, 55)),
+  levels = 7
+)
+
+set.seed(5678)
+regular_res <- tune_grid(
+  tune_wf,
+  resamples = my_folds,
+  grid = rf_grid
+)
+
+regular_res %>% 
+  collect_metrics() %>% 
+  filter(.metric == "rsq") %>% 
+  mutate(min_n = factor(min_n)) %>% 
+  ggplot(aes(mtry, mean, color = min_n)) +
+  geom_line(alpha = .7) +
+  geom_point()
+  # pivot_longer(min_n:mtry,
+  #              values_to = "value",
+  #              names_to = "parameter") %>% 
+  # ggplot(aes(value, mean, color = parameter)) +
+  # geom_point(show.legend = FALSE) +
+  # facet_wrap(~parameter, scales = "free_x")
+```
+
+```{r}
+best_rsq <- select_best(regular_res, "rsq")
+
+final_rf <- finalize_model(
+  tune_spec,
+  best_rsq
+)
+```
+
+
+```{r}
+require(vip)
+final_rf %>% 
+  set_engine("ranger", importance = "permutation") %>% 
+  fit(log_rent_amount ~., data = rent_juiced) %>% 
+  vip(geom = "point")
+
+```
+
+```{r}
+final_wf <- workflow() %>% 
+  add_recipe(rent_rec) %>% 
+  add_model(final_rf)
+
+final_res <- final_wf %>% 
+  last_fit(init_split)
+
+final_res %>% 
+  collect_metrics()
+
+final_res %>% 
+  collect_predictions() %>% 
+  bind_cols(test_df %>% 
+              select(log_rent_amount, everything()))
+```
+
+```{r}
+final_res
+```
+
+
+
+
+
+
+

@@ -113,10 +113,17 @@ xgb_res <- tune_grid(
   control = control_grid(save_pred = TRUE)
 )
 
-
 ```
 
+```{r}
+collect_metrics(xgb_res)
+```
 
+```{r}
+xgb_res %>%
+  collect_metrics() %>%
+  
+```
 
 
 

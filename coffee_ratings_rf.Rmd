@@ -11,9 +11,11 @@ knitr::opts_chunk$set(echo = TRUE)
 require(tidyverse)
 require(tidytuesdayR)
 
-last_tuesday <- lubridate::floor_date(Sys.Date(), "week", week_start = 2)
+# last_tuesday <- lubridate::floor_date(Sys.Date(), "week", week_start = 2)
 
-cr <- tidytuesdayR::tt_load(last_tuesday)
+my_tuesday <- "2020-07-07"
+
+cr <- tidytuesdayR::tt_load(my_tuesday)
 
 cr <- cr$coffee_ratings
 ```
@@ -25,6 +27,8 @@ cr %>%
   ggplot(aes(cupper_points)) +
   geom_histogram(bins = 100)
 ```
+
+## prelimenary modeling
 
 ```{r}
 require(broom)
@@ -44,4 +48,57 @@ lm1 %>%
 ```
 
 ## random forest to predict cupper_points
+
+```{r}
+require(tidymodels)
+
+cr <- cr %>% 
+  mutate_if(is.character, factor)
+
+set.seed(321)
+isplit <- initial_split(cr)
+
+train_df <- training(isplit)
+test_df <- testing(isplit)
+
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  min_n = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune(),
+  learn_rate = tune()
+) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+xgb_grid <- grid_latin_hypercube(
+  tree_depth(),
+  min_n(),
+  loss_reduction(),
+  sample_size = sample_prop(),
+  finalize(mtry(), train_df),
+  learn_rate(),
+  size = 30
+)
+```
+
+we had to treat `mtry()` differently because it depends on the actual number of predictors in the data.
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
 

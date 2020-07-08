@@ -1,0 +1,47 @@
+---
+title: "coffee-ratings-rf"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+require(tidytuesdayR)
+
+last_tuesday <- lubridate::floor_date(Sys.Date(), "week", week_start = 2)
+
+cr <- tidytuesdayR::tt_load(last_tuesday)
+
+cr <- cr$coffee_ratings
+```
+
+```{r}
+
+# seems somewhat normal
+cr %>% 
+  ggplot(aes(cupper_points)) +
+  geom_histogram(bins = 100)
+```
+
+```{r}
+require(broom)
+
+lm1 <- cr %>%
+  mutate(country_of_origin = fct_lump(country_of_origin, 4)) %>% 
+  lm(cupper_points ~ number_of_bags + country_of_origin + total_cup_points + altitude_mean_meters, data = .) %>% 
+  tidy(conf.int = TRUE)
+  
+lm1 %>% 
+  filter(term != "(Intercept)") %>% 
+  arrange(estimate) %>% 
+  filter(p.value <= .05) %>% 
+  ggplot(aes(estimate, term)) +
+  geom_point() +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high))
+```
+
+## random forest to predict cupper_points
+

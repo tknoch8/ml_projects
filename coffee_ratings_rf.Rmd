@@ -87,10 +87,34 @@ xgb_grid <- grid_latin_hypercube(
 we had to treat `mtry()` differently because it depends on the actual number of predictors in the data.
 
 ```{r}
-
+wf <- workflow() %>% 
+  add_formula(cupper_points ~.) %>% 
+  add_model(xgb_spec)
 ```
 
+let's create cross-validation resamples for tuning our model.
 
+```{r}
+set.seed(432)
+coffolds <- vfold_cv(train_df)
+```
+
+```{r}
+require(tidyverse)
+require(tidymodels)
+doParallel::registerDoParallel()
+
+set.seed(543)
+
+xgb_res <- tune_grid(
+  wf,
+  resamples = coffolds,
+  grid = xgb_grid,
+  control = control_grid(save_pred = TRUE)
+)
+
+
+```
 
 
 

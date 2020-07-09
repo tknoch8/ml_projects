@@ -18,7 +18,7 @@ pca_prep <- prep(pca_rec)
 
 # how many PCs to keep?
 # maybe just 2?
-helpRs::get_pca_summary(pca_prep)
+summ <- helpRs::get_pca_summary(pca_prep)
 
 require(broom)
 
@@ -54,7 +54,7 @@ juice(pca_prep) %>%
   # scale_color_manual(aes(color), values = c("blue", "red"))
 
 juice(pca_prep) %>% 
-  ggplot(aes(PC1, PC3, label = id)) +
+  ggplot(aes(PC1, 0, label = id)) +
   geom_point(aes(color = surv), size = 2) +
   # geom_text(check_overlap = TRUE, hjust = "inward") +
   labs(color = NULL)

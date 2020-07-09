@@ -16,16 +16,8 @@ pca_rec <- recipe(~., data = sparrows) %>%
 
 pca_prep <- prep(pca_rec)
 
-### wrote into helpRs package ###
-pca_prep %>% 
-  pluck("steps") %>% 
-  pluck(2) %>% 
-  pluck("res") %>% 
-  summary()
-
-# get pca cumulative 
-comp_sum <- pca_prep$steps[[2]]$res %>% summary()
-
+# how many PCs to keep?
+# maybe just 2?
 helpRs::get_pca_summary(pca_prep)
 
 require(broom)

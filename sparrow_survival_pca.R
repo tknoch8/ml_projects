@@ -59,3 +59,24 @@ juice(pca_prep) %>%
   # geom_text(check_overlap = TRUE, hjust = "inward") +
   labs(color = NULL)
 # scale_color_manual(aes(color), values = c("blue", "red"))
+
+
+glm(
+  juice(pca_prep)$sex ~ juice(pca_prep)$PC1, family = "binomial"
+)
+
+sparrows %>% 
+  mutate(surv = factor(surv)) %>% 
+  ggplot(aes(surv, femur)) +
+  geom_boxplot()
+
+alive_femurs <- sparrows %>% 
+  filter(surv == "1") %>% 
+  pull(femur)
+
+dead_femurs <- sparrows %>% 
+  filter(surv == "0") %>% 
+  pull(femur)
+
+t.test(alive_femurs, dead_femurs, alternative = "two.sided", var.equal = TRUE)
+

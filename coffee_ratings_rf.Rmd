@@ -122,14 +122,78 @@ collect_metrics(xgb_res)
 ```{r}
 xgb_res %>%
   collect_metrics() %>%
-  
+  filter(.metric == "rsq") %>% 
+  select(mtry:sample_size) %>% 
+  pivot_longer(mtry:sample_size,
+               values_to = "value",
+               names_to = "parameter") %>% 
+  ggplot(aes(value, fill = parameter)) +
+  geom_histogram() +
+  facet_wrap(~parameter, scale = "free")
 ```
 
+```{r}
+show_best(xgb_res, "rsq")
+```
 
+```{r}
+best_rsq <- select_best(xgb_res, "rsq")
+best_rsq
+```
 
+```{r}
+final_xgb <- finalize_workflow(
+  wf,
+  best_rsq
+)
 
+final_xgb
+```
 
+Instead of `tune()` placeholders, we now have real values for all the model hyperparameters.
 
+```{r}
+library(vip)
 
+final_xgb %>%
+  fit(data = train_df) %>%
+  pull_workflow_fit() %>%
+  vip(geom = "point")
+```
 
+```{r}
+final_res <- last_fit(final_xgb, isplit)
+```
+
+```{r}
+final_res %>% 
+  collect_predictions() %>% 
+  ggplot(aes(.row, .pred)) +
+  geom_point(color = "blue") +
+  geom_point(aes(.row, cupper_points), color = "red") +
+  labs(y = "cupper_points",
+       x = "row id",
+       title = "Cupper points predictions",
+       subtitle = "blue = predictions, red = actuals")
+```
+
+```{r}
+my_fit <- final_xgb %>%
+  fit(data = train_df) %>%
+  pull_workflow_fit()
+```
+
+```{r}
+my_fit <- final_xgb %>% 
+  fit(train_df)
+
+# see predictions of model fit on first 25 obs from test_df
+my_fit %>% 
+  predict(test_df[1:25,]) %>% 
+  bind_cols(test_df[1:25,]) %>% 
+  select(cupper_points, .pred, everything())
+
+# should be able to predict using final_res, which is trained on resamples
+
+```
 

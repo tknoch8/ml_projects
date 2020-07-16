@@ -115,7 +115,54 @@ new_preds %>%
 
 ```
 
+## PCA
 
+```{r}
+heart_rec <- recipe(target ~., data = heart) %>% 
+  update_role(id, new_role = "id") %>% 
+  step_normalize(all_predictors()) %>% 
+  step_pca(all_predictors())
+
+pca_prep <- prep(heart_rec)
+
+# how many PCs to keep?
+# maybe just 2?
+summ <- helpRs::get_pca_summary(pca_prep)
+
+summ
+
+require(broom)
+
+tidy_pca <- tidy(pca_prep, 2)
+
+tidy_pca %>% 
+  filter(component %in% paste0("PC", 1:5)) %>% 
+  mutate(component = fct_inorder(component)) %>% 
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(y = NULL)
+
+require(tidytext)
+
+tidy_pca %>% 
+  filter(component %in% paste0("PC", 1:4)) %>% 
+  group_by(component) %>% 
+  top_n(8, abs(value)) %>% 
+  ungroup() %>% 
+  mutate(terms = tidytext::reorder_within(terms, abs(value), component)) %>% 
+  ggplot(aes(abs(value), terms, fill = value > 0)) +
+  geom_col() +
+  tidytext::scale_y_reordered() +
+  facet_wrap(~component, nrow = 1, scales = "free_y") +
+  labs(y = NULL, fill = "Positive?")
+
+juice(pca_prep) %>% 
+  ggplot(aes(PC1, PC2, label = id)) +
+  geom_point(aes(color = target), size = 2) +
+  # geom_text(check_overlap = TRUE, hjust = "inward") +
+  labs(color = NULL)
+```
 
 
 

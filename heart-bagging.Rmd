@@ -103,11 +103,13 @@ new_pats <- crossing(
 ) %>% 
   mutate(id = row_number())
 
+new_preds <- new_pats %>% 
+  bind_cols(predict(tree_res, new_pats))
+
 # stupid
-# weird with logistic regression
-new_pats %>% 
-  bind_cols(predict(tree_res, new_pats)) %>% 
-  ggplot(aes(age, trestbps, color = .pred_class)) +
+# weird with logistic regression  
+new_preds %>% 
+  ggplot(aes(age, chol, color = .pred_class)) +
   geom_line(size = 1.2, alpha = 0.7) +
   geom_point(size = 1.5)
 

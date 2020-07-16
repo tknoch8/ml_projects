@@ -87,30 +87,20 @@ test_res %>%
 
 ```{r}
 new_pats <- crossing(
-  age = sample(heart_test$age + 5, 2, replace = TRUE),
-  sex = sample(c(0, 1), 2, replace = TRUE),
-  cp = sample(c(1:3), 2, replace = TRUE),
-  trestbps = seq(100, 150, by = 10),
-  chol = seq(150, 500, by = 50),
-  fbs = sample(c(0, 1), 2, replace = TRUE),
-  restecg = sample(c(0, 1), 2, replace = TRUE),
-  thalach = seq(125, 180, by = 15),
-  exang = sample(c(0, 1), 2, replace = TRUE),
-  oldpeak = seq(0, 3, by = .5),
-  slope = sample(c(0:3), 2, replace = TRUE),
-  ca = sample(c(0:3), 2, replace = TRUE),
-  thal = sample(c(0:3), 2, replace = TRUE)
-) %>% 
-  mutate(id = row_number())
-
-# stupid
-# weird with logistic regression
-new_pats %>% 
-  bind_cols(predict(tree_res, new_pats)) %>% 
-  ggplot(aes(age, trestbps, color = .pred_class)) +
-  geom_line(size = 1.2, alpha = 0.7) +
-  geom_point(size = 1.5)
-
+  age = sample(heart_test$age + 5, 10, replace = TRUE),
+  sex = sample(c(0, 1), 10, replace = TRUE),
+  cp = sample(c(1:3), 10, replace = TRUE),
+  trestbps = seq(100, 150, by = 5),
+  chol = seq(150, 500, by = 20),
+  fbs = sample(c(0, 1), 10, replace = TRUE),
+  restecg = sample(c(0, 1), 10, replace = TRUE),
+  thalach = seq(125, 180, by = 5),
+  exang = sample(c(0, 1), 10, replace = TRUE),
+  oldpeak = seq(0, 3, by = .2),
+  slope = sample(c(0:3), 10, replace = TRUE),
+  ca = sample(c(0:3), 10, replace = TRUE),
+  thal = sample(c(0:3), 10, replace = TRUE)
+)
 ```
 
 

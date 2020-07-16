@@ -1,0 +1,100 @@
+---
+title: "heart-bagging"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+require(tidymodels)
+
+heart <- read_csv("data/heart.csv") %>% 
+  mutate(target = as.factor(target)) %>% 
+  mutate(id = row_number())
+
+skimr::skim(heart)
+```
+
+## recipe
+
+```{r}
+set.seed(8765)
+
+heart_split <- initial_split(heart, strata = "target")
+heart_train <- training(heart_split)
+heart_test <- testing(heart_split)
+
+heart_rec <- recipe(target ~., data = heart) %>% 
+  update_role(id, new_role = "id") %>% 
+  step_normalize(all_predictors())
+
+heart_prep <- prep(heart_rec)  
+```
+
+## peak at prepped data
+
+```{r}
+juice(heart_prep) %>% 
+  head()
+```
+
+## model
+
+```{r}
+require(baguette)
+
+wf <- workflow() %>% 
+  add_recipe(heart_rec)
+  
+tree_spec <- bag_tree() %>% 
+  set_engine("rpart", times = 100) %>% 
+  set_mode("regression")
+
+mars_spec <- bag_mars() %>% 
+  set_engine("earth", times = 100) %>% 
+  set_mode("regression")
+
+tree_res <- wf %>% 
+  add_model(tree_spec) %>% 
+  fit(heart_train)
+
+mars_res <- wf %>% 
+  add_model(mars_spec) %>% 
+  fit(heart_train)
+
+```
+
+## evaluate
+
+```{r}
+test_res <- heart_test %>% 
+  bind_cols(predict(tree_res, heart_test)) %>% 
+  rename(.pred_tree = .pred_class) %>% 
+  bind_cols(predict(mars_res, heart_test)) %>% 
+  rename(.pred_mars = .pred_class)
+
+test_res %>% 
+  metrics(target, .pred_tree)
+
+test_res %>% 
+  metrics(target, .pred_mars)
+```
+
+## make new observations and predict target
+
+```{r}
+new_pats <- crossing(
+  
+)
+```
+
+
+
+
+
+
+
+

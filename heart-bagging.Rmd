@@ -1,0 +1,171 @@
+---
+title: "heart-bagging"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+require(tidymodels)
+
+heart <- read_csv("data/heart.csv") %>% 
+  mutate(target = as.factor(target)) %>% 
+  mutate(id = row_number())
+
+skimr::skim(heart)
+```
+
+## recipe
+
+```{r}
+set.seed(8765)
+
+heart_split <- initial_split(heart, strata = "target")
+heart_train <- training(heart_split)
+heart_test <- testing(heart_split)
+
+heart_rec <- recipe(target ~., data = heart) %>% 
+  update_role(id, new_role = "id") %>% 
+  step_normalize(all_predictors())
+
+heart_prep <- prep(heart_rec)
+```
+
+## peak at prepped data
+
+```{r}
+juice(heart_prep) %>% 
+  head()
+```
+
+## model
+
+```{r}
+require(baguette)
+
+wf <- workflow() %>% 
+  add_recipe(heart_rec)
+  
+tree_spec <- bag_tree() %>% 
+  set_engine("rpart", times = 100) %>% 
+  set_mode("regression")
+
+mars_spec <- bag_mars() %>% 
+  set_engine("earth", times = 100) %>% 
+  set_mode("regression")
+
+tree_res <- wf %>% 
+  add_model(tree_spec) %>% 
+  fit(heart_train)
+
+mars_res <- wf %>% 
+  add_model(mars_spec) %>% 
+  fit(heart_train)
+
+```
+
+## evaluate
+
+```{r}
+test_res <- heart_test %>% 
+  bind_cols(predict(tree_res, heart_test)) %>% 
+  rename(.pred_tree = .pred_class) %>% 
+  bind_cols(predict(mars_res, heart_test)) %>% 
+  rename(.pred_mars = .pred_class)
+
+test_res %>% 
+  metrics(target, .pred_tree)
+
+test_res %>% 
+  metrics(target, .pred_mars)
+```
+
+## make new observations and predict target
+
+```{r}
+new_pats <- crossing(
+  age = sample(heart_test$age + 5, 2, replace = TRUE),
+  sex = sample(c(0, 1), 2, replace = TRUE),
+  cp = sample(c(1:3), 2, replace = TRUE),
+  trestbps = seq(100, 150, by = 10),
+  chol = seq(150, 500, by = 50),
+  fbs = sample(c(0, 1), 2, replace = TRUE),
+  restecg = sample(c(0, 1), 2, replace = TRUE),
+  thalach = seq(125, 180, by = 15),
+  exang = sample(c(0, 1), 2, replace = TRUE),
+  oldpeak = seq(0, 3, by = .5),
+  slope = sample(c(0:3), 2, replace = TRUE),
+  ca = sample(c(0:3), 2, replace = TRUE),
+  thal = sample(c(0:3), 2, replace = TRUE)
+) %>% 
+  mutate(id = row_number())
+
+new_preds <- new_pats %>% 
+  bind_cols(predict(tree_res, new_pats))
+
+# stupid
+# weird with logistic regression  
+new_preds %>% 
+  ggplot(aes(age, chol, color = .pred_class)) +
+  geom_line(size = 1.2, alpha = 0.7) +
+  geom_point(size = 1.5)
+
+```
+
+## PCA
+
+```{r}
+heart_rec <- recipe(target ~., data = heart) %>% 
+  update_role(id, new_role = "id") %>% 
+  step_normalize(all_predictors()) %>% 
+  step_pca(all_predictors())
+
+pca_prep <- prep(heart_rec)
+
+# how many PCs to keep?
+# maybe just 2?
+summ <- helpRs::get_pca_summary(pca_prep)
+
+summ
+
+require(broom)
+
+tidy_pca <- tidy(pca_prep, 2)
+
+tidy_pca %>% 
+  filter(component %in% paste0("PC", 1:5)) %>% 
+  mutate(component = fct_inorder(component)) %>% 
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(y = NULL)
+
+require(tidytext)
+
+tidy_pca %>% 
+  filter(component %in% paste0("PC", 1:4)) %>% 
+  group_by(component) %>% 
+  top_n(8, abs(value)) %>% 
+  ungroup() %>% 
+  mutate(terms = tidytext::reorder_within(terms, abs(value), component)) %>% 
+  ggplot(aes(abs(value), terms, fill = value > 0)) +
+  geom_col() +
+  tidytext::scale_y_reordered() +
+  facet_wrap(~component, nrow = 1, scales = "free_y") +
+  labs(y = NULL, fill = "Positive?")
+
+juice(pca_prep) %>% 
+  ggplot(aes(PC1, PC2, label = id)) +
+  geom_point(aes(color = target), size = 2) +
+  # geom_text(check_overlap = TRUE, hjust = "inward") +
+  labs(color = NULL)
+```
+
+
+
+
+
+

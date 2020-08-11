@@ -162,6 +162,18 @@ juice(pca_prep) %>%
   geom_point(aes(color = target), size = 2) +
   # geom_text(check_overlap = TRUE, hjust = "inward") +
   labs(color = NULL)
+
+juice(pca_prep) %>% 
+  ggplot(aes(PC1, PC3, label = id)) +
+  geom_point(aes(color = target), size = 2) +
+  # geom_text(check_overlap = TRUE, hjust = "inward") +
+  labs(color = NULL)
+
+juice(pca_prep) %>% 
+  ggplot(aes(PC2, PC3, label = id)) +
+  geom_point(aes(color = target), size = 2) +
+  # geom_text(check_overlap = TRUE, hjust = "inward") +
+  labs(color = NULL)
 ```
 
 

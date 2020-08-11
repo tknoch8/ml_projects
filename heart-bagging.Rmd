@@ -31,7 +31,11 @@ heart_rec <- recipe(target ~., data = heart) %>%
   update_role(id, new_role = "id") %>% 
   step_normalize(all_predictors())
 
+<<<<<<< HEAD
 heart_prep <- prep(heart_rec)
+=======
+heart_prep <- prep(heart_rec)  
+>>>>>>> dbeda13ca5777f798790cb76b1fce0c157deb2cc
 ```
 
 ## peak at prepped data

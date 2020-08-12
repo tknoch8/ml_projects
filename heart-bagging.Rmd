@@ -79,7 +79,10 @@ juice(heart_prep) %>%
 ## model
 
 ```{r}
-# package for boostrap aggrgating
+# package for bootstrap aggregating
+# type of model averaging
+# "Bagging is used with decision trees, where it significantly raises the stability of models in the reduction of variance and improving accuracy, which eliminates the challenge of overfitting."
+# - corporatefinanceinstitute.com
 require(baguette)
 
 # create workflow object
@@ -94,10 +97,14 @@ mars_spec <- bag_mars() %>%
   set_engine("earth", times = 100) %>% 
   set_mode("regression")
 
+# doParallel::registerDoParallel()
+
+# Tree-based model
 tree_res <- wf %>% 
   add_model(tree_spec) %>% 
   fit(heart_train)
 
+# Multivariate Adaptive Regression Splines
 mars_res <- wf %>% 
   add_model(mars_spec) %>% 
   fit(heart_train)

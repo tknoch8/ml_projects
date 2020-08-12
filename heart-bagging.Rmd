@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 require(tidyverse)
 require(tidymodels)
+require(broom)
 
 heart <- read_csv("data/heart.csv") %>% 
   mutate(target = as.factor(target)) %>% 
@@ -18,19 +19,53 @@ heart <- read_csv("data/heart.csv") %>%
 skimr::skim(heart)
 ```
 
-## recipe
+1) age - age in years
+2) sex - 0 = f; 1 = m
+3) cp - chest pain type (4 values)
+4) trestbps - resting blood pressure
+5) chol - serum cholestorol in mg/dl
+6) fbs - fasting blood sugar > 120 mg/dl
+7) restecg - resting electrocardiographic results (values 0,1,2)
+8) thalach - maximum heart rate achieved
+9) exang - exercise induced angina
+10) oldpeak - ST depression induced by exercise relative to rest
+11) slope - the slope of the peak exercise ST segment
+12) ca - number of major vessels (0-3) colored by flouroscopy
+13) thal - 0 = normal; 1 = fixed defect; 2 = reversible defect
+14) target-  0 = less chance of heart attack 1 = more chance of heart attack
+
+## some simple models
+## skipping normality checks
+
+```{r}
+
+# logistic regression
+heart %>% 
+  glm(target ~ age + sex, 
+      data = ., 
+      family = "binomial") %>% 
+  tidy()
+# for every one unit increase in Xi, there is a ___ increase in the log odds of being at elevated risk for heart attack
+# for reference, a log odds of -1.39 corresponds to a probability of 0.2
+```
+
+## some more robust modeling
+## 1. recipe
 
 ```{r}
 set.seed(8765)
 
+# create training/test 75/25 split
 heart_split <- initial_split(heart, strata = "target")
 heart_train <- training(heart_split)
 heart_test <- testing(heart_split)
 
+# data pre-processing 
 heart_rec <- recipe(target ~., data = heart) %>% 
   update_role(id, new_role = "id") %>% 
   step_normalize(all_predictors())
 
+# finalize recipe
 heart_prep <- prep(heart_rec)
 ```
 
@@ -44,8 +79,10 @@ juice(heart_prep) %>%
 ## model
 
 ```{r}
+# package for boostrap aggrgating
 require(baguette)
 
+# create workflow object
 wf <- workflow() %>% 
   add_recipe(heart_rec)
   

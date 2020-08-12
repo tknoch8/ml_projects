@@ -32,7 +32,7 @@ skimr::skim(heart)
 11) slope - the slope of the peak exercise ST segment
 12) ca - number of major vessels (0-3) colored by flouroscopy
 13) thal - 0 = normal; 1 = fixed defect; 2 = reversible defect
-14) target-  0 = less chance of heart attack 1 = more chance of heart attack
+14) target - 0 = less chance of heart attack 1 = more chance of heart attack
 
 ## some simple models
 ## skipping normality checks
@@ -76,7 +76,7 @@ juice(heart_prep) %>%
   head()
 ```
 
-## model
+## 2. model
 
 ```{r}
 # package for bootstrap aggregating
@@ -88,23 +88,23 @@ require(baguette)
 # create workflow object
 wf <- workflow() %>% 
   add_recipe(heart_rec)
-  
+
+# Tree-based model  
 tree_spec <- bag_tree() %>% 
   set_engine("rpart", times = 100) %>% 
   set_mode("regression")
 
+# Multivariate Adaptive Regression Splines
 mars_spec <- bag_mars() %>% 
   set_engine("earth", times = 100) %>% 
   set_mode("regression")
 
 # doParallel::registerDoParallel()
 
-# Tree-based model
 tree_res <- wf %>% 
   add_model(tree_spec) %>% 
   fit(heart_train)
 
-# Multivariate Adaptive Regression Splines
 mars_res <- wf %>% 
   add_model(mars_spec) %>% 
   fit(heart_train)
@@ -150,8 +150,6 @@ new_pats <- crossing(
 new_preds <- new_pats %>% 
   bind_cols(predict(tree_res, new_pats))
 
-# stupid
-# weird with logistic regression  
 new_preds %>% 
   ggplot(aes(age, chol, color = .pred_class)) +
   geom_line(size = 1.2, alpha = 0.7) +
@@ -218,6 +216,12 @@ juice(pca_prep) %>%
   geom_point(aes(color = target), size = 2) +
   # geom_text(check_overlap = TRUE, hjust = "inward") +
   labs(color = NULL)
+
+juice(pca_prep) %>% 
+  glm(target ~PC1 + PC2 + PC3 + PC4 + PC5, data = ., family = "binomial") %>% 
+  tidy() %>% 
+  filter(p.value <= 0.05) %>% 
+  arrange(desc(estimate))
 ```
 
 

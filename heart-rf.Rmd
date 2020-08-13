@@ -1,0 +1,147 @@
+---
+title: "heart-randomForest"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+library(scales)
+library(tidyverse)
+library(tidymodels)
+library(silgelib)
+library(broom)
+theme_set(theme_plex())
+```
+
+```{r}
+heart <- read_csv("data/heart.csv") %>% 
+  mutate(target = as.factor(target)) %>% 
+  mutate(id = row_number())
+```
+
+```{r}
+set.seed(4321)
+
+# create training/test 75/25 split
+heart_split <- initial_split(heart, strata = "target")
+heart_train <- training(heart_split)
+heart_test <- testing(heart_split)
+
+# data pre-processing 
+heart_rec <- recipe(target ~., data = heart) %>% 
+  update_role(id, new_role = "id") %>% 
+  step_normalize(all_predictors())
+
+# finalize recipe
+heart_prep <- prep(heart_rec)
+```
+
+```{r}
+xg_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  min_n = tune(),
+  loss_reduction = tune(),                     ## first three: model complexity
+  sample_size = tune(), 
+  mtry = tune(),                               ## randomness
+  learn_rate = tune(),                         ## step size
+) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+xg_spec
+```
+
+## hyperparameter tuning
+
+```{r}
+xg_grid <- grid_latin_hypercube(
+  tree_depth(),
+  min_n(),
+  loss_reduction(),
+  sample_size = sample_prop(),
+  finalize(mtry(), heart_train), # depends on actual number of predictors in data
+  learn_rate(),
+  size = 30
+)
+
+xg_grid
+```
+
+## create workflow
+
+```{r}
+xg_wf <- workflow() %>%
+  add_formula(target ~ .) %>%
+  add_model(xg_spec)
+
+xg_wf
+```
+
+## create cv resamples
+
+```{r}
+set.seed(1234)
+
+folds <- vfold_cv(heart_train, strata = target)
+
+folds
+```
+
+## tune for best hyperparameters
+
+```{r}
+# can train in parallel
+doParallel::registerDoParallel()
+
+set.seed(2345)
+# takes soooooo long
+xg_res <- tune_grid(
+  xg_wf,
+  resamples = folds,
+  grid = xg_grid,
+  control = control_grid(save_pred = TRUE)
+)
+
+xg_res
+```
+
+## explore results
+
+```{r}
+collect_metrics(xg_res)
+```
+
+## visualize metrics at different values of tuning parameters
+
+```{r}
+xg_res %>% 
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  select(mean, mtry:sample_size) %>%
+  pivot_longer(mtry:sample_size,
+               values_to = "value",
+               names_to = "parameter") %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+
+## what are the best parameter values
+```{r}
+# best five models in terms of area under the curve (want a low false-positive rate)
+show_best(xg_res, "roc_auc")
+```
+
+
+
+
+
+
+
+
+
+
+

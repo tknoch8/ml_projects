@@ -38,7 +38,6 @@ skimr::skim(heart)
 ## skipping normality checks
 
 ```{r}
-
 # logistic regression
 heart %>% 
   glm(target ~ age + sex, 
@@ -216,7 +215,11 @@ juice(pca_prep) %>%
   geom_point(aes(color = target), size = 2) +
   # geom_text(check_overlap = TRUE, hjust = "inward") +
   labs(color = NULL)
+```
 
+## Use principal components as independent variables in new linear model
+
+```{r}
 juice(pca_prep) %>% 
   glm(target ~PC1 + PC2 + PC3 + PC4 + PC5, data = ., family = "binomial") %>% 
   tidy() %>% 

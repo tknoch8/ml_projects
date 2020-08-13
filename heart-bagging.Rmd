@@ -91,7 +91,7 @@ wf <- workflow() %>%
 # Tree-based model  
 tree_spec <- bag_tree() %>% 
   set_engine("rpart", times = 100) %>% 
-  set_mode("regression")
+  set_mode("classification")
 
 # Multivariate Adaptive Regression Splines
 mars_spec <- bag_mars() %>% 
@@ -104,6 +104,12 @@ tree_res <- wf %>%
   add_model(tree_spec) %>% 
   fit(heart_train)
 
+require(vip)
+
+# tree_res %>% 
+#   pull_workflow_fit() %>% 
+#   vi(method = "model")
+
 mars_res <- wf %>% 
   add_model(mars_spec) %>% 
   fit(heart_train)
@@ -115,7 +121,7 @@ mars_res <- wf %>%
 ```{r}
 test_res <- heart_test %>% 
   bind_cols(predict(tree_res, heart_test)) %>% 
-  rename(.pred_tree = .pred_class) %>% 
+  rename(.pred_tree = .pred_class) %>% View()
   bind_cols(predict(mars_res, heart_test)) %>% 
   rename(.pred_mars = .pred_class)
 

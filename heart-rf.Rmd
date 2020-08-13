@@ -135,12 +135,61 @@ xg_res %>%
 show_best(xg_res, "roc_auc")
 ```
 
+## choose "best" model
 
+```{r}
+best_auc <- select_best(xg_res, "roc_auc")
+best_auc
+```
 
+## finalize workflow
 
+```{r}
+final_xg <- finalize_workflow(
+  xg_wf,
+  best_auc
+)
 
+final_xg
+```
 
+## we now have values for hyperparameters instead of using "tune()"
 
+```{r}
+require(vip)
+
+final_xg %>% 
+  fit(data = heart_train %>% 
+        select(-id)) %>% 
+  pull_workflow_fit() %>% 
+  vip(geom = "point")
+```
+
+## test model
+
+```{r}
+final_res <- last_fit(final_xg, heart_split)
+
+collect_metrics(final_res)
+```
+
+## create ROC curve (northwest is best, lower false-positive rate)
+
+```{r}
+final_res %>%
+  collect_predictions() %>%
+  # mutate(target = as.integer(target)) %>% 
+  # mutate(.pred_class = as.factor(.pred_class)) %>% 
+  # mutate(estimate = as.numeric(estimate)) %>% 
+  roc_curve(target, .pred_class) %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(size = 1.5, color = "midnightblue") +
+  geom_abline(
+    lty = 2, alpha = 0.5,
+    color = "gray50",
+    size = 1.2
+  )
+```
 
 
 

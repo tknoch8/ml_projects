@@ -148,6 +148,8 @@ require(textrecipes)
 rev_rec <- recipe(four_five_stars ~ ., data = train_df) %>% 
   update_role(reviewer_id, new_role = "id variable") %>% 
   themis::step_downsample(four_five_stars) %>% 
+  # step_textfeature(all_predictors()) %>% 
+  step_nzv(all_predictors()) %>% 
   step_tokenize(review_text) %>% 
   step_stopwords(review_text) %>% 
   step_tokenfilter(review_text, max_tokens = 500) %>% 
@@ -263,8 +265,62 @@ rev_final %>%
   conf_mat(four_five_stars, .pred_class)
 ```
 
+## repeat with textfeatures and rf + support vector machine
 
+```{r}
+f_rec <- recipe(four_five_stars ~ ., data = train_df) %>% 
+  update_role(reviewer_id, new_role = "id variable") %>% 
+  themis::step_downsample(four_five_stars) %>% 
+  step_textfeature(review_text) %>%
+  step_nzv(all_predictors()) %>% 
+  # step_tokenize(review_text) %>% 
+  # step_stopwords(review_text) %>% 
+  # step_tokenfilter(review_text, max_tokens = 500) %>% 
+  # step_tfidf(review_text) %>% 
+  step_normalize(all_numeric())
 
+# prep recipe
+f_prep <- prep(f_rec)
+f_prep
+
+# see prepped training data
+juice(f_prep)
+
+# specify model
+rf_spec <- rand_forest(trees = 1000) %>% 
+  set_engine("ranger") %>% 
+  set_mode("classification")
+
+rf_spec
+
+svm_spec <- svm_rbf(cost = 0.5) %>% 
+  set_engine("kernlab") %>% 
+  set_mode("classification")
+
+svm_spec
+```
+
+## evaluate metrics
+
+```{r}
+
+```
+
+## get the 'best' model
+
+```{r}
+
+```
+
+## Variable importance
+
+```{r}
+
+```
+
+```{r}
+
+```
 
 
 

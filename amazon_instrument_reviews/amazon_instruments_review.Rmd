@@ -26,12 +26,12 @@ reviews <- read_csv("amazon_instrument_reviews/amazon-music-reviews/Musical_inst
   # keep reviews after 2010
   filter(lubridate::year(review_date) >= 2010) %>% 
   # did the review give 5 stars
-  mutate(five_stars = if_else(overall == 5, "yes", "no")) %>% 
-  mutate(five_stars = as.factor(five_stars))
+  mutate(four_five_stars = if_else(overall %in% c(4, 5), "yes", "no")) %>% 
+  mutate(four_five_stars = as.factor(four_five_stars))
 
 # inspect
-reviews %>% 
-  View()
+# reviews %>% 
+  # View()
 
 ```
 
@@ -64,8 +64,8 @@ by_month <- reviews %>%
   summarize(
     n_ratings = n(),
     avg_rating = mean(overall),
-    pct_5 = mean(overall == 5),
-    pct_lower = mean(overall != 5)
+    pct_5 = mean(overall %in% c(4, 5)),
+    pct_lower = mean(!overall %in% c(4, 5))
   ) %>% 
   ungroup()
 
@@ -120,6 +120,7 @@ topic_model %>%
   mutate(term = tidytext::reorder_within(term, beta, topic)) %>% 
   ggplot(aes(beta, term)) +
   geom_col() +
+  scale_y_reordered() +
   facet_wrap(~topic, scales = "free")
 
 ```
@@ -135,17 +136,18 @@ reviews <- reviews %>%
          # overall, 
          # was_helpful, 
          # review_date, 
-         five_stars)
+         four_five_stars)
 
 set.seed(20200515)
-rev_split <- initial_split(reviews, strata = five_stars)
+rev_split <- initial_split(reviews, strata = four_five_stars)
 train_df <- training(rev_split)
 test_df <- testing(rev_split)
 
 require(textrecipes)
 
-rev_rec <- recipe(five_stars ~ ., data = train_df) %>% 
+rev_rec <- recipe(four_five_stars ~ ., data = train_df) %>% 
   update_role(reviewer_id, new_role = "id variable") %>% 
+  themis::step_downsample(four_five_stars) %>% 
   step_tokenize(review_text) %>% 
   step_stopwords(review_text) %>% 
   step_tokenfilter(review_text, max_tokens = 500) %>% 
@@ -175,7 +177,7 @@ wf
 
 ```{r}
 # create bootstrap resamples
-boots <- bootstraps(train_df, strata = five_stars)
+boots <- bootstraps(train_df, strata = four_five_stars)
 boots
 
 # make lambda grid
@@ -203,11 +205,12 @@ lasso_grid %>%
   collect_metrics() %>% 
   ggplot(aes(penalty, mean, color = .metric)) +
   geom_line(size = 1.5, show.legend = FALSE) +
-  facet_wrap(~.metric, nrow = 1) +
+  facet_wrap(~.metric, ncol = 1) +
   scale_x_log10()
+  # geom_vline(aes(xintercept = .00910))
 ```
 
-I am not a statistician (yet) so I will make any definitive statements as to the statistical integrity of this model. I am not including for purely demonstrational purposes.
+I am not a statistician (yet) so I will make any definitive statements as to the statistical integrity of this model. I am not including for purely demonstration purposes.
 
 ## get the 'best' model
 
@@ -257,7 +260,7 @@ rev_final %>%
 # view confusion matrix
 rev_final %>% 
   collect_predictions() %>% 
-  conf_mat(five_stars, .pred_class)
+  conf_mat(four_five_stars, .pred_class)
 ```
 
 

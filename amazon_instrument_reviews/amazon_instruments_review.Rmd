@@ -298,12 +298,58 @@ svm_spec <- svm_rbf(cost = 0.5) %>%
   set_mode("classification")
 
 svm_spec
+
+wf2 <- workflow() %>% 
+  add_recipe(f_rec)
+
 ```
 
-## evaluate metrics
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(4567)
+rf_res <- wf2 %>% 
+  add_model(rf_spec) %>% 
+  fit_resamples(
+    resamples = boots,
+    metrics = metric_set(roc_auc, accuracy, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+  )
+
+collect_metrics(rf_res)
+
+# lots of false negatives
+conf_mat_resampled(rf_res)
+```
+
 
 ```{r}
+set.seed(7654)
+svm_res <- wf2 %>% 
+  add_model(svm_spec) %>% 
+  fit_resamples(
+    resamples = boots,
+    metrics = metric_set(roc_auc, accuracy, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+  )
 
+collect_metrics(svm_res)
+
+# even more false negatives
+conf_mat_resampled(svm_res)
+```
+
+
+## evaluate model
+
+```{r}
+rf_res %>% 
+  collect_predictions() %>% 
+  group_by(id) %>% 
+  roc_curve(four_five_stars, .pred_yes) %>% 
+  ggplot(aes(1 - specificity, sensitivity, color = id)) +
+  geom_abline(lty = 2, alpha = 0.75, size = 1.5) +
+  geom_path(show.legend = FALSE, alpha = 0.65)
 ```
 
 ## get the 'best' model

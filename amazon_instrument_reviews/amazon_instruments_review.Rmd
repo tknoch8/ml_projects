@@ -26,8 +26,8 @@ reviews <- read_csv("amazon_instrument_reviews/amazon-music-reviews/Musical_inst
   # keep reviews after 2010
   filter(lubridate::year(review_date) >= 2010) %>% 
   # did the review give 5 stars
-  mutate(four_five_stars = if_else(overall %in% c(4, 5), "yes", "no")) %>% 
-  mutate(four_five_stars = as.factor(four_five_stars))
+  mutate(five_stars = if_else(overall %in% c(5), "yes", "no")) %>% 
+  mutate(five_stars = as.factor(five_stars))
 
 # inspect
 # reviews %>% 
@@ -136,18 +136,18 @@ reviews <- reviews %>%
          # overall, 
          # was_helpful, 
          # review_date, 
-         four_five_stars)
+         five_stars)
 
 set.seed(20200515)
-rev_split <- initial_split(reviews, strata = four_five_stars)
+rev_split <- initial_split(reviews, strata = five_stars)
 train_df <- training(rev_split)
 test_df <- testing(rev_split)
 
 require(textrecipes)
 
-rev_rec <- recipe(four_five_stars ~ ., data = train_df) %>% 
+rev_rec <- recipe(five_stars ~ ., data = train_df) %>% 
   update_role(reviewer_id, new_role = "id variable") %>% 
-  themis::step_downsample(four_five_stars) %>% 
+  themis::step_downsample(five_stars) %>% 
   # step_textfeature(all_predictors()) %>% 
   step_nzv(all_predictors()) %>% 
   step_tokenize(review_text) %>% 
@@ -179,7 +179,7 @@ wf
 
 ```{r}
 # create bootstrap resamples
-boots <- bootstraps(train_df, strata = four_five_stars)
+boots <- bootstraps(train_df, strata = five_stars)
 boots
 
 # make lambda grid
@@ -262,15 +262,15 @@ rev_final %>%
 # view confusion matrix
 rev_final %>% 
   collect_predictions() %>% 
-  conf_mat(four_five_stars, .pred_class)
+  conf_mat(five_stars, .pred_class)
 ```
 
 ## repeat with textfeatures and rf + support vector machine
 
 ```{r}
-f_rec <- recipe(four_five_stars ~ ., data = train_df) %>% 
+f_rec <- recipe(five_stars ~ ., data = train_df) %>% 
   update_role(reviewer_id, new_role = "id variable") %>% 
-  themis::step_downsample(four_five_stars) %>% 
+  themis::step_downsample(five_stars) %>% 
   step_textfeature(review_text) %>%
   step_nzv(all_predictors()) %>% 
   # step_tokenize(review_text) %>% 
@@ -339,30 +339,30 @@ collect_metrics(svm_res)
 conf_mat_resampled(svm_res)
 ```
 
-
 ## evaluate model
 
 ```{r}
-rf_res %>% 
+svm_res %>% 
   collect_predictions() %>% 
   group_by(id) %>% 
-  roc_curve(four_five_stars, .pred_yes) %>% 
+  roc_curve(five_stars, .pred_yes) %>% 
   ggplot(aes(1 - specificity, sensitivity, color = id)) +
   geom_abline(lty = 2, alpha = 0.75, size = 1.5) +
   geom_path(show.legend = FALSE, alpha = 0.65)
 ```
 
-## get the 'best' model
-
-```{r}
-rf_res %>% 
-  collect_metrics()
-```
-
 ## Variable importance
 
 ```{r}
-
+wf2 %>% 
+  add_model(svm_spec) %>% 
+  fit(train_df) %>% 
+  pull_workflow_fit() %>% 
+  vip::vi(method = "permute",
+     target = "five_stars", 
+     metric = "auc",
+     reference_class = "no",
+     pred_wrapper = kernlab::predict)
 ```
 
 ```{r}

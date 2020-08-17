@@ -355,7 +355,8 @@ rf_res %>%
 ## get the 'best' model
 
 ```{r}
-
+rf_res %>% 
+  collect_metrics()
 ```
 
 ## Variable importance

@@ -1,0 +1,105 @@
+---
+title: "amazon-instrument-bagging"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(broom)
+
+reviews <- read_csv("amazon_instrument_reviews/amazon-music-reviews/Musical_instruments_reviews.csv") %>%
+  # snake case names
+  janitor::clean_names() %>% 
+  # first number parsed is number of people who found that review helpful
+  mutate(num_helpful = parse_number(helpful)) %>%
+  # was the review hwlpful to anyone
+  mutate(was_helpful = if_else(num_helpful > 0, "yes", "no")) %>% 
+  mutate(was_helpful = as.factor(was_helpful)) %>% 
+  # convert chr date to date class
+  mutate(review_date = anytime::anydate(review_time)) %>% 
+  # keep reviews after 2010
+  filter(lubridate::year(review_date) >= 2010) %>% 
+  # did the review give 5 stars
+  mutate(five_stars = if_else(overall %in% c(5), "yes", "no")) %>% 
+  mutate(five_stars = as.factor(five_stars)) %>% 
+  select(num_helpful,
+         was_helpful,
+         review_date,
+         five_stars)
+
+skimr::skim(reviews)
+
+```
+
+```{r}
+reviews %>% glimpse()
+```
+
+
+```{r}
+reviews %>% 
+  glm(five_stars ~ ., 
+      data = ., 
+      family = "binomial") %>% 
+  tidy()
+```
+
+```{r}
+rev_split <- initial_split(reviews, strata = "five_stars")
+
+rev_train <- training(rev_split)
+rev_test <- testing(rev_split)
+
+rev_rec <- recipe(five_stars ~., data = rev_train) %>% 
+  update_role(review_date, new_role = "id") %>% 
+  step_normalize(num_helpful) %>% 
+  step_dummy(was_helpful)
+
+rev_prep <- prep(rev_rec)
+
+juice(rev_prep) %>% 
+  head()
+```
+
+```{r}
+library(baguette)
+
+wf <- workflow() %>% 
+  add_recipe(rev_rec)
+
+# Tree-based model  
+tree_spec <- bag_tree() %>% 
+  set_engine("rpart", times = 100) %>% 
+  set_mode("classification")
+
+# Multivariate Adaptive Regression Splines
+mars_spec <- bag_mars() %>% 
+  set_engine("earth", times = 100) %>% 
+  set_mode("regression")
+
+tree_res <- wf %>% 
+  add_model(tree_spec) %>% 
+  fit(rev_train)
+
+mars_res <- wf %>% 
+  add_model(mars_spec) %>% 
+  fit(rev_train)
+
+test_res <- rev_test %>% 
+  bind_cols(predict(tree_res, rev_test)) %>% 
+  rename(.pred_tree = .pred_class) %>% 
+  bind_cols(predict(mars_res, rev_test)) %>% 
+  rename(.pred_mars = .pred_class)
+
+test_res %>% 
+  metrics(five_stars, .pred_tree)
+
+test_res %>% 
+  metrics(five_stars, .pred_mars)
+```
+

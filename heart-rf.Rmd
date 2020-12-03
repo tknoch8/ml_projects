@@ -18,6 +18,7 @@ theme_set(theme_plex())
 heart <- read_csv("data/heart.csv") %>% 
   mutate(target = as.factor(target)) %>% 
   mutate(id = row_number())
+  # sample_n(1000)
 ```
 
 ```{r}
